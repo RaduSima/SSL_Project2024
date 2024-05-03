@@ -1,0 +1,14 @@
+name: ssl_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11.5
+  - pytorch
+  - pandas
+  - pip:
+    - transformers
+    - datasets
+    - sentencepiece
+    - accelerate
+    - scikit-learn
