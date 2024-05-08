@@ -1,5 +1,6 @@
 import numpy
 import pandas as pd
+import pickle as pkl
 import torch
 from datasets import Dataset
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
@@ -129,14 +130,48 @@ def get_embedding(model, encoding):
 
     model.eval()
     with torch.no_grad():
-        embeddings = [model(input_ids[i].unsqueeze(0), attention_mask=attention_mask[i].unsqueeze(0)) for i in range(len(input_ids))]
+        embeddings = [model(input_ids[i].unsqueeze(0), attention_mask=attention_mask[i].unsqueeze(0)).squeeze(0) for i in range(len(input_ids))]
+    return embeddings
+
+def save_embedding(embeddings, filename):
+    """
+    Save the embeddings to a file.
+
+    Parameters
+    ----------
+    embeddings : tensor
+        The tensor of the embeddings.
+    filename : str
+        The filename to save the embeddings to.
+    """
+    with open(filename, 'wb') as f:
+        pkl.dump(embeddings, f)
+        
+def load_embedding(filename):
+    """
+    Load the embeddings from a file.
+
+    Parameters
+    ----------
+    filename : str
+        The filename to load the embeddings from.
+
+    Returns
+    -------
+    tensor
+        The tensor of the embeddings.
+    """
+    with open(filename, 'rb') as f:
+        embeddings = pkl.load(f)
     return embeddings
 
 if __name__ == '__main__':
-    num_epochs = 10
+    num_epochs = 100
     num_classes = 5
+    percentage_to_remove = 0
 
-    percentage_to_remove = 0.99
+    load_embeddings = False
+    
     train_data = pd.read_csv('./data/AMT10/AMT10_train.csv')
     val_data = pd.read_csv('./data/AMT10/AMT10_validation.csv')
     test_data = pd.read_csv('./data/AMT10/AMT10_test.csv')
@@ -148,24 +183,33 @@ if __name__ == '__main__':
     train_texts, train_labels = train_data['description'].tolist(), train_data['rating'].tolist()
     val_texts, val_labels = val_data['description'].tolist(), val_data['rating'].tolist()
     test_texts, test_labels = test_data['description'].tolist(), test_data['rating'].tolist()
+    if load_embeddings:
+        train_embeddings = load_embedding('train_embeddings.pkl')
+        val_embeddings = load_embedding('val_embeddings.pkl')
+        test_embeddings = load_embedding('test_embeddings.pkl')
+    else:
 
-    model_name = "google/bigbird-roberta-base"
-    tokenizer = BigBirdTokenizer.from_pretrained(model_name)
-    model = BigBirdForSequenceClassification.from_pretrained(model_name)
+        model_name = "google/bigbird-roberta-base"
+        tokenizer = BigBirdTokenizer.from_pretrained(model_name)
+        model = BigBirdForSequenceClassification.from_pretrained(model_name)
 
-    to_train_model = OrdinalRegressionClassifier(embeddings_size=768, num_classes=num_classes)
+        to_train_model = OrdinalRegressionClassifier(embeddings_size=768, num_classes=num_classes)
 
-    train_encodings = tokenizer(train_texts, truncation=True, padding=True)
-    val_encodings = tokenizer(val_texts, truncation=True, padding=True)
-    test_encodings = tokenizer(test_texts, truncation=True, padding=True)
+        train_encodings = tokenizer(train_texts, truncation=True, padding=True)
+        val_encodings = tokenizer(val_texts, truncation=True, padding=True)
+        test_encodings = tokenizer(test_texts, truncation=True, padding=True)
 
-    embedding_model = EmbeddingBigBirdModel(model.bert)
-    embedding_model.eval()
+        embedding_model = EmbeddingBigBirdModel(model.bert)
+        embedding_model.eval()
 
-    train_embeddings = get_embedding(embedding_model, train_encodings)
-    val_embeddings = get_embedding(embedding_model, val_encodings)
-    test_embeddings = get_embedding(embedding_model, test_encodings)
-
+        train_embeddings = get_embedding(embedding_model, train_encodings)
+        val_embeddings = get_embedding(embedding_model, val_encodings)
+        test_embeddings = get_embedding(embedding_model, test_encodings)
+        
+        save_embedding(train_embeddings, './data/AMT10/train_embeddings.pkl')
+        save_embedding(val_embeddings, './data/AMT10/val_embeddings.pkl')
+        save_embedding(test_embeddings, './data/AMT10/test_embeddings.pkl')
+        # endif
     train_labels_tensor = convert_label_to_one_hot_encodings(train_labels, num_classes=num_classes)
     val_labels_tensor = convert_label_to_one_hot_encodings(val_labels, num_classes=num_classes)
     test_labels_tensor = convert_label_to_one_hot_encodings(test_labels, num_classes=num_classes)
