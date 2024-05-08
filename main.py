@@ -108,6 +108,29 @@ def compute_metrics(pred):
         "neighborhood_accuracy": neighborhood_accuracy
     }
 
+def get_embedding(model, encoding):
+    """
+    Get the embedding from the model.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The model to get the embeddings from.
+    encoding : dict
+        The encoding of the text.
+
+    Returns
+    -------
+    tensor
+        The tensor of the embeddings.
+    """
+    input_ids = torch.tensor(encoding["input_ids"])
+    attention_mask = torch.tensor(encoding["attention_mask"])
+
+    model.eval()
+    with torch.no_grad():
+        embeddings = [model(input_ids[i].unsqueeze(0), attention_mask=attention_mask[i].unsqueeze(0)) for i in range(len(input_ids))]
+    return embeddings
 
 if __name__ == '__main__':
     num_epochs = 10
@@ -139,10 +162,9 @@ if __name__ == '__main__':
     embedding_model = EmbeddingBigBirdModel(model.bert)
     embedding_model.eval()
 
-    # TODO: make this batched
-    train_embeddings = embedding_model(input_ids=torch.tensor(train_encodings["input_ids"]), attention_mask=torch.tensor(train_encodings["attention_mask"]))
-    val_embeddings = embedding_model(input_ids=torch.tensor(val_encodings["input_ids"]), attention_mask=torch.tensor(val_encodings["attention_mask"]))
-    test_embeddings = embedding_model(input_ids=torch.tensor(test_encodings["input_ids"]), attention_mask=torch.tensor(test_encodings["attention_mask"]))
+    train_embeddings = get_embedding(embedding_model, train_encodings)
+    val_embeddings = get_embedding(embedding_model, val_encodings)
+    test_embeddings = get_embedding(embedding_model, test_encodings)
 
     train_labels_tensor = convert_label_to_one_hot_encodings(train_labels, num_classes=num_classes)
     val_labels_tensor = convert_label_to_one_hot_encodings(val_labels, num_classes=num_classes)
