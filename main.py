@@ -5,7 +5,8 @@ from datasets import Dataset
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from transformers import BigBirdForSequenceClassification, BigBirdTokenizer, Trainer, TrainingArguments
 
-from architectures.big_bird import OurBigBirdModel
+from architectures.big_bird import EmbeddingBigBirdModel, OurBigBirdModel
+from architectures.ordinal_regression_head import OrdinalRegressionClassifier
 
 
 def remove_percentage(df, percent):
@@ -29,7 +30,7 @@ def remove_percentage(df, percent):
     return df_removed
 
 
-def convert_label_to_one_hot_encodings(labels: list[float], num_classes, max_label=2800):
+def convert_label_to_one_hot_encodings(labels: list[float], num_classes, max_label=3500):
     """
     Convert the labels to a class representation. The class representation is a one-hot encoding of the labels.
     This preparation is for the ordinal regression problem.
@@ -109,17 +110,10 @@ def compute_metrics(pred):
 
 
 if __name__ == '__main__':
-    labels = list(range(10))
-    onehot = convert_label_to_one_hot_encodings(labels, 5, 9)
-
-    print(labels)
-    print(onehot)
-
-if __name__ == '2__main__':
-    num_epochs = 3
+    num_epochs = 10
     num_classes = 5
 
-    percentage_to_remove = 0.998
+    percentage_to_remove = 0.99
     train_data = pd.read_csv('./data/AMT10/AMT10_train.csv')
     val_data = pd.read_csv('./data/AMT10/AMT10_validation.csv')
     test_data = pd.read_csv('./data/AMT10/AMT10_test.csv')
@@ -136,11 +130,19 @@ if __name__ == '2__main__':
     tokenizer = BigBirdTokenizer.from_pretrained(model_name)
     model = BigBirdForSequenceClassification.from_pretrained(model_name)
 
-    model = OurBigBirdModel(model.bert, num_classes=num_classes)
+    to_train_model = OrdinalRegressionClassifier(embeddings_size=768, num_classes=num_classes)
 
     train_encodings = tokenizer(train_texts, truncation=True, padding=True)
     val_encodings = tokenizer(val_texts, truncation=True, padding=True)
     test_encodings = tokenizer(test_texts, truncation=True, padding=True)
+
+    embedding_model = EmbeddingBigBirdModel(model.bert)
+    embedding_model.eval()
+
+    # TODO: make this batched
+    train_embeddings = embedding_model(input_ids=torch.tensor(train_encodings["input_ids"]), attention_mask=torch.tensor(train_encodings["attention_mask"]))
+    val_embeddings = embedding_model(input_ids=torch.tensor(val_encodings["input_ids"]), attention_mask=torch.tensor(val_encodings["attention_mask"]))
+    test_embeddings = embedding_model(input_ids=torch.tensor(test_encodings["input_ids"]), attention_mask=torch.tensor(test_encodings["attention_mask"]))
 
     train_labels_tensor = convert_label_to_one_hot_encodings(train_labels, num_classes=num_classes)
     val_labels_tensor = convert_label_to_one_hot_encodings(val_labels, num_classes=num_classes)
@@ -148,22 +150,20 @@ if __name__ == '2__main__':
 
     train_dataset = Dataset.from_dict(
         {
-        "input_ids": train_encodings["input_ids"], 
-        "attention_mask": train_encodings["attention_mask"],
+        "embeddings": train_embeddings, 
         "labels": train_labels_tensor
         })
 
     val_dataset = Dataset.from_dict(
         {
-        "input_ids": val_encodings["input_ids"], 
-        "attention_mask": val_encodings["attention_mask"],
+        "embeddings": val_embeddings, 
         "labels": val_labels_tensor
+
         })
 
     test_dataset = Dataset.from_dict(
         {
-        "input_ids": test_encodings["input_ids"], 
-        "attention_mask": test_encodings["attention_mask"],
+        "embeddings": test_embeddings, 
         "labels": test_labels_tensor
         })
 
@@ -178,7 +178,7 @@ if __name__ == '2__main__':
     )
 
     trainer = Trainer(
-        model=model,
+        model=to_train_model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,

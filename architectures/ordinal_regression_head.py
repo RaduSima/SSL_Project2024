@@ -6,7 +6,7 @@ class OrdinalRegressionHead(torch.nn.Module):
     Ordinal regression head for classification problems. The way it works is by having a single layer that outputs a single value, which is then added to a learnable bias. The output is then passed through a sigmoid function.
     The bias is a learnable parameter that is used to shift the output of the single layer to the desired range. It will be learned to have descending order.
     
-    class = sum(b_i > 0) + 1
+    class = sum(b_i > 0.5) + 1
     
     class 1: 0, 0, 0, 0
     class 2: 1, 0, 0, 0
@@ -56,3 +56,13 @@ class OrdinalRegressionHead(torch.nn.Module):
         x = self.fc(x)
         y = x + self.b
         return y, self.activation(y)
+
+class OrdinalRegressionClassifier(torch.nn.Module):
+    def __init__(self, embeddings_size, num_classes) -> None:
+        super(OrdinalRegressionClassifier, self).__init__()
+        self.head = OrdinalRegressionHead(embeddings_size, num_classes)
+        self.loss = torch.nn.BCEWithLogitsLoss()
+
+    def forward(self, embeddings, labels):
+        logits, output = self.head(embeddings)
+        return self.loss(logits, labels), output
