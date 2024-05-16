@@ -1,3 +1,4 @@
+import gc
 import numpy
 import pandas as pd
 import pickle as pkl
@@ -125,12 +126,19 @@ def get_embedding(model, encoding):
     tensor
         The tensor of the embeddings.
     """
-    input_ids = torch.tensor(encoding["input_ids"])
-    attention_mask = torch.tensor(encoding["attention_mask"])
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    input_ids = torch.tensor(encoding["input_ids"]).to(device)
+    attention_mask = torch.tensor(encoding["attention_mask"]).to(device)
 
     model.eval()
+    embeddings = []
+    
     with torch.no_grad():
-        embeddings = [model(input_ids[i].unsqueeze(0), attention_mask=attention_mask[i].unsqueeze(0)).squeeze(0) for i in range(len(input_ids))]
+        for i in range(len(input_ids)):
+            embedding = model(input_ids[i].unsqueeze(0), attention_mask=attention_mask[i].unsqueeze(0)).squeeze(0).cpu()
+            embeddings.append(embedding)
+            gc.collect()
+            torch.cuda.empty_cache()
     return embeddings
 
 def save_embedding(embeddings, filename):
@@ -166,93 +174,60 @@ def load_embedding(filename):
     return embeddings
 
 if __name__ == '__main__':
-    num_epochs = 100
     num_classes = 5
-    percentage_to_remove = 0
+    percentage_to_remove = 0.99
 
-    load_embeddings = False
+    load_embeddings = True
     
-    train_data = pd.read_csv('./data/AMT10/AMT10_train.csv')
-    val_data = pd.read_csv('./data/AMT10/AMT10_validation.csv')
     test_data = pd.read_csv('./data/AMT10/AMT10_test.csv')
 
-    train_data = remove_percentage(train_data, percentage_to_remove)
-    val_data = remove_percentage(val_data, percentage_to_remove)
     test_data = remove_percentage(test_data, percentage_to_remove)
 
-    train_texts, train_labels = train_data['description'].tolist(), train_data['rating'].tolist()
-    val_texts, val_labels = val_data['description'].tolist(), val_data['rating'].tolist()
     test_texts, test_labels = test_data['description'].tolist(), test_data['rating'].tolist()
     if load_embeddings:
-        train_embeddings = load_embedding('train_embeddings.pkl')
-        val_embeddings = load_embedding('val_embeddings.pkl')
-        test_embeddings = load_embedding('test_embeddings.pkl')
+        test_embeddings = load_embedding('./data/AMT10/test_embeddings.pkl')
     else:
 
         model_name = "google/bigbird-roberta-base"
         tokenizer = BigBirdTokenizer.from_pretrained(model_name)
         model = BigBirdForSequenceClassification.from_pretrained(model_name)
 
-        to_train_model = OrdinalRegressionClassifier(embeddings_size=768, num_classes=num_classes)
-
-        train_encodings = tokenizer(train_texts, truncation=True, padding=True)
-        val_encodings = tokenizer(val_texts, truncation=True, padding=True)
         test_encodings = tokenizer(test_texts, truncation=True, padding=True)
 
         embedding_model = EmbeddingBigBirdModel(model.bert)
         embedding_model.eval()
 
-        train_embeddings = get_embedding(embedding_model, train_encodings)
-        val_embeddings = get_embedding(embedding_model, val_encodings)
         test_embeddings = get_embedding(embedding_model, test_encodings)
         
-        save_embedding(train_embeddings, './data/AMT10/train_embeddings.pkl')
-        save_embedding(val_embeddings, './data/AMT10/val_embeddings.pkl')
         save_embedding(test_embeddings, './data/AMT10/test_embeddings.pkl')
         # endif
-    train_labels_tensor = convert_label_to_one_hot_encodings(train_labels, num_classes=num_classes)
-    val_labels_tensor = convert_label_to_one_hot_encodings(val_labels, num_classes=num_classes)
     test_labels_tensor = convert_label_to_one_hot_encodings(test_labels, num_classes=num_classes)
 
-    train_dataset = Dataset.from_dict(
-        {
-        "embeddings": train_embeddings, 
-        "labels": train_labels_tensor
-        })
+    classifier_model_weights = torch.load("./models/ordinal_regression_model.pth")
+    classifier_model = OrdinalRegressionClassifier(embeddings_size=768, num_classes=num_classes, intermediate_layers=[512, 128, 32])
+    classifier_model.load_state_dict(classifier_model_weights)
+    
+    # model = OurBigBirdModel(BigBirdForSequenceClassification.from_pretrained("google/bigbird-roberta-base"), num_classes=num_classes, intermediate_layers=[512, 128, 32])
+    # model.classifier = classifier_model.head
 
-    val_dataset = Dataset.from_dict(
-        {
-        "embeddings": val_embeddings, 
-        "labels": val_labels_tensor
+    # classifier = model.classifier
+    classifier = classifier_model.head
+    outputs = []
+    
+    classifier.eval()
+    with torch.no_grad():
+      for i in range(len(test_embeddings)):
+          logit, output = classifier(test_embeddings[i])
+          outputs.append(output.unsqueeze(0))
 
-        })
+    outputs = torch.cat(outputs).cpu().numpy()
+    output_class = numpy.sum(outputs > 0.5, axis=-1) + 1
+    labels = test_labels_tensor.cpu().numpy()
+    target_class = numpy.sum(labels > 0.5, axis=-1) + 1
 
-    test_dataset = Dataset.from_dict(
-        {
-        "embeddings": test_embeddings, 
-        "labels": test_labels_tensor
-        })
+    for text, output, target in zip(test_texts, output_class, target_class):
+      output_score = int(3500/num_classes * (output - 1)), int(3500/num_classes * output)
+      target_score = int(3500/num_classes * (target - 1)), int(3500/num_classes * target)
 
-    training_args = TrainingArguments(
-        output_dir="./results",
-        num_train_epochs=num_epochs,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
-        warmup_steps=500,
-        weight_decay=0.01,
-        logging_dir="./logs",
-    )
-
-    trainer = Trainer(
-        model=to_train_model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=val_dataset,
-        compute_metrics=compute_metrics
-    )
-
-    trainer.train()
-
-    # Evaluate the model on the testing set
-    eval_results = trainer.evaluate(test_dataset)
-    print(eval_results)
+      print(f"Predicted {output_score}, Target {target_score}\nFor text:\n{text}\n\n")
+      

@@ -8,12 +8,12 @@ class OurBigBirdModel(torch.nn.Module):
     It uses the pretrained classifier of a BigBird model and adds an ordinal regression head on top of it.
 
     """
-    def __init__(self, bert, num_classes=5):
+    def __init__(self, bert, num_classes=5, intermediate_layers=None):
         super(OurBigBirdModel, self).__init__()
 
         self.bert = bert
         # The output of the bert model is 768, as it is the output of the last hidden state.
-        self.classifier = OrdinalRegressionHead(768, num_classes)
+        self.classifier = OrdinalRegressionHead(768, num_classes, intermediate_layers=intermediate_layers)
         
         self.loss = torch.nn.BCEWithLogitsLoss()
 

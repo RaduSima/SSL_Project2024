@@ -17,7 +17,7 @@ class OrdinalRegressionHead(torch.nn.Module):
 
     TODO: should have more than one fc layer.
     """
-    def __init__(self, in_features, num_classes):
+    def __init__(self, in_features, num_classes, intermediate_layers=None):
         """
         The constructor for OrdinalRegressionHead class.
 
@@ -29,11 +29,19 @@ class OrdinalRegressionHead(torch.nn.Module):
             The number of classes in the classification problem.
         """
         super(OrdinalRegressionHead, self).__init__()
-        self.in_features = in_features
-        
-        self.fc = torch.nn.Sequential(
-            torch.nn.Linear(in_features, 1, bias=False),
-        )
+
+        if intermediate_layers is None:
+            intermediate_layers = []
+
+        input_size = in_features
+        layers = []
+        for layer_size in intermediate_layers:
+            layers.append(torch.nn.Linear(input_size, layer_size))
+            layers.append(torch.nn.ReLU())
+            input_size = layer_size
+        layers.append(torch.nn.Linear(input_size, 1, bias=False))
+
+        self.fc = torch.nn.Sequential(*layers)
 
         self.b = torch.nn.Parameter(torch.zeros(num_classes - 1))
         self.activation = torch.nn.Sigmoid()
@@ -58,9 +66,9 @@ class OrdinalRegressionHead(torch.nn.Module):
         return y, self.activation(y)
 
 class OrdinalRegressionClassifier(torch.nn.Module):
-    def __init__(self, embeddings_size, num_classes) -> None:
+    def __init__(self, embeddings_size, num_classes, intermediate_layers=None) -> None:
         super(OrdinalRegressionClassifier, self).__init__()
-        self.head = OrdinalRegressionHead(embeddings_size, num_classes)
+        self.head = OrdinalRegressionHead(embeddings_size, num_classes, intermediate_layers)
         self.loss = torch.nn.BCEWithLogitsLoss()
 
     def forward(self, embeddings, labels):
