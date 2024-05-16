@@ -12,5 +12,11 @@ conda activate ssl_env
 ## Run trainer
 
 ```bash
-python main.py
+python train.py
+```
+
+## Run evaluation
+
+```bash
+python eval.py
 ```
