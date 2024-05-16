@@ -92,9 +92,9 @@ def _compute_metrics(preds, labels):
 
     # compute accuracy, recall, precision, f1 for threshold 0.5
     accuracy = accuracy_score(target_class, output_class)
-    recall = recall_score(target_class, output_class, average='macro')
-    precision = precision_score(target_class, output_class, average='macro')
-    f1 = f1_score(target_class, output_class, average='macro')
+    recall = recall_score(target_class, output_class, average='macro', zero_division=numpy.nan)
+    precision = precision_score(target_class, output_class, average='macro', zero_division=numpy.nan)
+    f1 = f1_score(target_class, output_class, average='macro', zero_division=numpy.nan)
 
     # compute neighborhood accuracy -- consider accurate all predictions that are off by 1
     neighborhood_accuracy = numpy.sum(
