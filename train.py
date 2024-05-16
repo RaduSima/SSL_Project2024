@@ -194,8 +194,11 @@ if __name__ == '__main__':
     test_texts, test_labels = test_data['description'].tolist(), test_data['rating'].tolist()
     if load_embeddings:
         train_embeddings = load_embedding('./data/AMT10/train_embeddings.pkl')
+        train_embeddings = torch.tensor(train_embeddings)
         val_embeddings = load_embedding('./data/AMT10/val_embeddings.pkl')
+        val_embeddings = torch.tensor(val_embeddings)
         test_embeddings = load_embedding('./data/AMT10/test_embeddings.pkl')
+        test_embeddings = torch.tensor(test_embeddings)
     else:
 
         model_name = "google/bigbird-roberta-base"

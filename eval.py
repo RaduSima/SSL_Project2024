@@ -186,6 +186,7 @@ if __name__ == '__main__':
     test_texts, test_labels = test_data['description'].tolist(), test_data['rating'].tolist()
     if load_embeddings:
         test_embeddings = load_embedding('./data/AMT10/test_embeddings.pkl')
+        test_embeddings = torch.tensor(test_embeddings)
     else:
 
         model_name = "google/bigbird-roberta-base"
@@ -225,9 +226,9 @@ if __name__ == '__main__':
     labels = test_labels_tensor.cpu().numpy()
     target_class = numpy.sum(labels > 0.5, axis=-1) + 1
 
-    for text, output, target in zip(test_texts, output_class, target_class):
+    for text, label, output, target in zip(test_texts, test_labels, output_class, target_class):
       output_score = int(3500/num_classes * (output - 1)), int(3500/num_classes * output)
       target_score = int(3500/num_classes * (target - 1)), int(3500/num_classes * target)
 
-      print(f"Predicted {output_score}, Target {target_score}\nFor text:\n{text}\n\n")
+      print(f"Predicted {output_score}, Target {target_score}, Real label {int(label)}\nFor text:\n{text}\n\n")
       
