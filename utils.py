@@ -22,6 +22,7 @@ def remove_percentage(df, percent):
     dataframe
         The dataframe with the rows removed.
     """
+    numpy.random.seed(42)
     num_rows_to_remove = int(len(df) * percent)
     df_removed = df.sample(frac=1).iloc[num_rows_to_remove:]
     return df_removed
