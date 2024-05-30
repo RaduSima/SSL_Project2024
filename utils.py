@@ -36,6 +36,11 @@ transformers_classes = {
         "tokenizer_class": BigBirdTokenizer,
         "embedding_size": 768,
     },
+    'google/bigbird-roberta-large': {
+        "model_class": BigBirdModel,
+        "tokenizer_class": BigBirdTokenizer,
+        "embedding_size": 1024,
+    },
     "t5-small": {
         "model_class": T5ForSequenceClassification,
         "tokenizer_class": T5Tokenizer,
@@ -183,12 +188,20 @@ def _compute_metrics_difficulty_classifier(preds, difficulty_ratings):
     neighborhood_accuracy = numpy.sum(
         numpy.abs(target_class - output_class) <= 1).item() / (len(difficulty_ratings) * 1.0)
 
+    neighborhood_accuracy3 = numpy.sum(
+        numpy.abs(target_class - output_class) <= 3).item() / (len(difficulty_ratings) * 1.0)
+    
+    neighborhood_accuracy5 = numpy.sum(
+        numpy.abs(target_class - output_class) <= 5).item() / (len(difficulty_ratings) * 1.0)
+
     return {
         "accuracy": accuracy,
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        "neighborhood_accuracy": neighborhood_accuracy
+        "neighborhood_accuracy": neighborhood_accuracy,
+        "neighborhood_accuracy3": neighborhood_accuracy3,
+        "neighborhood_accuracy5": neighborhood_accuracy5,
     }
 
 
@@ -251,7 +264,7 @@ def get_embedding(model, encoding):
     input_ids = torch.tensor(encoding["input_ids"]).to(device)
     attention_mask = torch.tensor(encoding["attention_mask"]).to(device)
 
-    batch_size = 10
+    batch_size = 6
     model = model.to(device)
     model.eval()
     embeddings = []
@@ -384,7 +397,7 @@ def _compute_full_embeddings(transformer_name, texts, set_name, base_path):
 
     train_encodings = tokenizer(texts, truncation=True, padding=True)
 
-    embedding_model = EmbeddingBigBirdModel(model.bert)
+    embedding_model = EmbeddingBigBirdModel(model)
     embedding_model.eval()
 
     train_embeddings = get_embedding(embedding_model, train_encodings)
