@@ -7,7 +7,7 @@ import numpy
 import torch
 from datasets import Dataset
 from sklearn.metrics import (accuracy_score, f1_score, precision_score,
-                             recall_score)
+                             recall_score, average_precision_score)
 from transformers import (BigBirdForSequenceClassification, BigBirdTokenizer, BigBirdModel,
                           T5ForSequenceClassification, T5Tokenizer)
 
@@ -52,7 +52,6 @@ transformers_classes = {
         "embedding_size": 512,
     },
 }
-
 
 MAX_DIFFICULTY_RATING = 3500
 
@@ -106,7 +105,8 @@ def convert_tags_to_one_hot_encodings(tags: list[list[str]], tag2id: dict):
     return torch.tensor(tags_tensor)
 
 
-def convert_difficulty_difficulty_rating_to_one_hot_encodings(difficulty_ratings: list[float], num_classes, max_difficulty_rating=MAX_DIFFICULTY_RATING):
+def convert_difficulty_difficulty_rating_to_one_hot_encodings(difficulty_ratings: list[float], num_classes,
+                                                              max_difficulty_rating=MAX_DIFFICULTY_RATING):
     """
     Convert the difficulty_ratings to a class representation. The class representation is a one-hot encoding of the difficulty_ratings.
     This preparation is for the ordinal regression problem.
@@ -146,7 +146,49 @@ def convert_difficulty_difficulty_rating_to_one_hot_encodings(difficulty_ratings
     return torch.tensor(class_difficulty_ratings)
 
 
-def compute_metrics_difficulty_classifier(pred):
+def create_metrics_tag_function(threshold):
+    """
+    Create a metrics function that includes the threshold parameter.
+
+    Parameters
+    ----------
+    threshold : float
+        The threshold value to be used in the metrics computation.
+
+    Returns
+    -------
+    function
+        A function that computes metrics using the specified threshold.
+    """
+
+    def wrapper(pred):
+        return compute_metrics_tag_classifier(pred, threshold)
+
+    return wrapper
+
+
+def create_metrics_difficulty_function(threshold):
+    """
+    Create a metrics function that includes the threshold parameter.
+
+    Parameters
+    ----------
+    threshold : float
+        The threshold value to be used in the metrics computation.
+
+    Returns
+    -------
+    function
+        A function that computes metrics using the specified threshold.
+    """
+
+    def wrapper(pred):
+        return compute_metrics_difficulty_classifier(pred, threshold)
+
+    return wrapper
+
+
+def compute_metrics_difficulty_classifier(pred, threshold):
     """
     Compute the metrics for the model. The metrics are accuracy, recall, precision, f1, and neighborhood accuracy.
 
@@ -163,11 +205,10 @@ def compute_metrics_difficulty_classifier(pred):
     difficulty_ratings = pred.label_ids
     preds = pred.predictions
 
-    return _compute_metrics_difficulty_classifier(preds, difficulty_ratings)
+    return _compute_metrics_difficulty_classifier(preds, difficulty_ratings, threshold)
 
 
-def _compute_metrics_difficulty_classifier(preds, difficulty_ratings):
-    threshold = 0.5
+def _compute_metrics_difficulty_classifier(preds, difficulty_ratings, threshold):
     target_class = numpy.sum(difficulty_ratings > threshold, axis=-1) + 1
     output_class = numpy.sum(preds > threshold, axis=-1) + 1
 
@@ -183,34 +224,52 @@ def _compute_metrics_difficulty_classifier(preds, difficulty_ratings):
     neighborhood_accuracy = numpy.sum(
         numpy.abs(target_class - output_class) <= 1).item() / (len(difficulty_ratings) * 1.0)
 
+    unique_classes = numpy.unique(target_class)
+    ap_scores = []
+    for cls in unique_classes:
+        binarized_target = (target_class == cls).astype(int)
+        binarized_output = (output_class == cls).astype(int)
+        ap = average_precision_score(binarized_target, binarized_output)
+        ap_scores.append(ap)
+    mean_average_precision = numpy.mean(ap_scores)
+
     return {
         "accuracy": accuracy,
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        "neighborhood_accuracy": neighborhood_accuracy
+        "neighborhood_accuracy": neighborhood_accuracy,
+        "map": mean_average_precision
     }
 
 
-def _compute_metrics_tag_classifier(preds, tags):
-    # compute accuracy, recall, precision, f1 for threshold 0.5
+def _compute_metrics_tag_classifier(preds, tags, threshold):
+    # compute accuracy, recall, precision, f1
     print("Hey!")
-    pred_classes = numpy.array(preds > 0.5, dtype=int)
+    pred_classes = numpy.array(preds > threshold, dtype=int)
     accuracy = accuracy_score(tags, pred_classes)
     recall = recall_score(tags, pred_classes, average='macro', zero_division=0)
     precision = precision_score(
         tags, pred_classes, average='macro', zero_division=0)
     f1 = f1_score(tags, pred_classes, average='macro', zero_division=0)
 
+    num_classes = tags.shape[1]
+    ap_scores = []
+    for i in range(num_classes):
+        ap = average_precision_score(tags[:, i], preds[:, i])
+        ap_scores.append(ap)
+    mean_average_precision = numpy.mean(ap_scores)
+
     return {
         "accuracy": accuracy,
         "precision": precision,
         "recall": recall,
         "f1": f1,
+        "map": mean_average_precision
     }
 
 
-def compute_metrics_tag_classifier(pred):
+def compute_metrics_tag_classifier(pred, threshold):
     """
     Compute the metrics for the model. The metrics are accuracy, recall, precision, f1, and neighborhood accuracy.
 
@@ -228,7 +287,7 @@ def compute_metrics_tag_classifier(pred):
     tags = pred.label_ids
     preds = pred.predictions
 
-    return _compute_metrics_tag_classifier(preds, tags)
+    return _compute_metrics_tag_classifier(preds, tags, threshold)
 
 
 def get_embedding(model, encoding):
@@ -260,18 +319,19 @@ def get_embedding(model, encoding):
 
     with torch.no_grad():
         for i in range(0, len(input_ids), batch_size):
-            batch_input_ids = input_ids[i:i+batch_size]
-            batch_attention_mask = attention_mask[i:i+batch_size]
+            batch_input_ids = input_ids[i:i + batch_size]
+            batch_attention_mask = attention_mask[i:i + batch_size]
             embedding = model(
                 batch_input_ids, attention_mask=batch_attention_mask).to("cpu")
             embeddings.append(embedding)
             gc.collect()
             torch.cuda.empty_cache()
             elapsed_time = int(tm() - start_time)
-            time_per_iter = round(elapsed_time / (i+batch_size), 2)
-            remaining_time = int((len(input_ids)-i)*time_per_iter)
+            time_per_iter = round(elapsed_time / (i + batch_size), 2)
+            remaining_time = int((len(input_ids) - i) * time_per_iter)
             print(
-                f"Status {i+batch_size}/{len(input_ids)}  Elapsed: {elapsed_time}s ({time_per_iter}s/it)  Remaining: {remaining_time}s", end="\r")
+                f"Status {i + batch_size}/{len(input_ids)}  Elapsed: {elapsed_time}s ({time_per_iter}s/it)  Remaining: {remaining_time}s",
+                end="\r")
     print("Embeddings done.")
     del input_ids
     del attention_mask
@@ -328,7 +388,8 @@ def prepare_dataset_tag_classifier(embeddings, tags, tag2id):
     return dataset
 
 
-def prepare_dataset_difficulty_classifier(embeddings, difficulty_ratings, num_classes=5, max_difficulty_rating=MAX_DIFFICULTY_RATING):
+def prepare_dataset_difficulty_classifier(embeddings, difficulty_ratings, num_classes=5,
+                                          max_difficulty_rating=MAX_DIFFICULTY_RATING):
     difficulty_ratings_tensor = convert_difficulty_difficulty_rating_to_one_hot_encodings(
         difficulty_ratings, num_classes, max_difficulty_rating=max_difficulty_rating)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -358,7 +419,8 @@ def prepare_finetune_dataset_tag_classifier(transformer_name, texts, tags, tag2i
     return dataset
 
 
-def prepare_finetune_dataset_difficulty_classifier(transformer_name, texts, difficulty_ratings, num_classes=5, max_difficulty_rating=MAX_DIFFICULTY_RATING):
+def prepare_finetune_dataset_difficulty_classifier(transformer_name, texts, difficulty_ratings, num_classes=5,
+                                                   max_difficulty_rating=MAX_DIFFICULTY_RATING):
     difficulty_ratings_tensor = convert_difficulty_difficulty_rating_to_one_hot_encodings(
         difficulty_ratings, num_classes, max_difficulty_rating=max_difficulty_rating)
 
@@ -376,7 +438,6 @@ def prepare_finetune_dataset_difficulty_classifier(transformer_name, texts, diff
 
 
 def _compute_full_embeddings(transformer_name, texts, set_name, base_path):
-
     tokenizer = transformers_classes[transformer_name]["tokenizer_class"].from_pretrained(
         transformer_name)
     model = transformers_classes[transformer_name]["model_class"].from_pretrained(
@@ -509,10 +570,11 @@ def predict_difficulty(input, model, tokenizer, hyperparameters):
     num_classes = hyperparameters["num_classes"]
 
     min_difficulty_rating = (difficulty_class - 1) * \
-        MAX_DIFFICULTY_RATING / num_classes
+                            MAX_DIFFICULTY_RATING / num_classes
     max_difficulty_rating = difficulty_class * MAX_DIFFICULTY_RATING / num_classes
 
-    difficulty_range = [(m, M) for m, M in zip(numpy.uint32(min_difficulty_rating), numpy.uint32(max_difficulty_rating))]
+    difficulty_range = [(m, M) for m, M in
+                        zip(numpy.uint32(min_difficulty_rating), numpy.uint32(max_difficulty_rating))]
 
     if len(difficulty_range) == 1:
         difficulty_range = difficulty_range[0]
