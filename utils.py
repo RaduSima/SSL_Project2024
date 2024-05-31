@@ -578,7 +578,7 @@ def predict_difficulty(input, model, tokenizer, hyperparameters):
 
     with torch.no_grad():
         predictions = model(input_ids, attention_mask=attention_mask).detach().cpu().numpy()
-    difficulty_class = numpy.sum(predictions > 0.5, axis=-1) + 1
+    difficulty_class = numpy.sum(predictions > 0.41, axis=-1) + 1
 
     num_classes = hyperparameters["num_classes"]
 
@@ -608,7 +608,7 @@ def predict_tags(input, model, tokenizer, hyperparameters):
 
     with torch.no_grad():
         predictions = model(input_ids, attention_mask=attention_mask).detach().cpu().numpy()
-    tags = numpy.array(predictions > 0.5, dtype=int)
+    tags = numpy.array(predictions > 0.35, dtype=int)
 
     tags = [i for i, tag in enumerate(tags[0]) if tag == 1]
 
